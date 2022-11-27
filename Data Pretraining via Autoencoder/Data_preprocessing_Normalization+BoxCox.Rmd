@@ -1,0 +1,78 @@
+---
+title: "data_preprocessing_normalization+BoxCox"
+author: "Lingfeng Huo"
+date: "2022/4/30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+Part II  In this part, we preprocess the train data and test data through BoxCox transformation and z-score normalization
+
+```{r load packages}
+library(mlbench)
+library(MASS)
+library(glmvsd)
+library(dplyr)
+```  
+(1) Read the original train and test data
+```{r read data}
+trainnew<-read.csv("Autoinsurance_train.csv")
+testnew<-read.csv("Autoinsurance_test.csv")
+```  
+(2) Box-Cox Transformation
+Below we consider Box-Cox transformation for the predictors selected. We first plot the log-likelihood functions for each predictor and found the lambda that maximizes the log-likelihood function. Then, the lambda is used as the power to transform the corresponding predictor.  
+```{r Transformation by BC}
+# The predictors to consider Box-Cox
+predr_nm<-c("age_of_driver", "safty_rating", "annual_income", "claim_est_payout", "vehicle_price", "vehicle_weight") 
+
+# plot the log-likelihood functions for each predictor and found the lambda that maximizes the log-likelihood function
+for (i in 1:length(predr_nm)) {
+  MASS::boxcox(trainnew[,predr_nm[i]]~1)
+}
+
+# Result of BC:
+# log transformation:
+# "age_of_driver"    "claim_est_payout" "vehicle_price"    "vehicle_weight" 
+
+# square transformation:
+# "safty_rating"  "annual_income"
+
+# Do the transformation for the trainset and testset
+# trainset
+trainnew$age_of_driver<-log(trainnew$age_of_driver)
+trainnew$claim_est_payout<-log(trainnew$claim_est_payout)
+trainnew$vehicle_price<-log(trainnew$vehicle_price)
+trainnew$vehicle_weight<-log(trainnew$vehicle_weight)
+trainnew$safty_rating<-(trainnew$safty_rating)^2
+trainnew$annual_income<-(trainnew$annual_income)^2
+
+# testset
+testnew$age_of_driver<-log(testnew$age_of_driver)
+testnew$claim_est_payout<-log(testnew$claim_est_payout)
+testnew$vehicle_price<-log(testnew$vehicle_price)
+testnew$vehicle_weight<-log(testnew$vehicle_weight)
+testnew$safty_rating<-(testnew$safty_rating)^2
+testnew$annual_income<-(testnew$annual_income)^2
+```  
+
+(3) Z-score Normalization for all variables
+```{r}
+for (i in 1:(ncol(trainnew)-1))
+{
+  # trainset
+  trainnew[,i]<-(trainnew[,i]-mean(trainnew[,i]))/sd(trainnew[,i])
+  # testset
+  testnew[,i]<-(testnew[,i]-mean(testnew[,i]))/sd(testnew[,i])
+}
+```  
+
+(4) output the new trainset and testset
+```{r output the trainset and testset}
+# output the trainset named as Autoinsurance_trainnew.csv
+write.csv(trainnew, file=paste0("Autoinsurance_trainnew", ".csv"), row.names=F)
+# output the testset named as Autoinsurance_testnew.csv 
+write.csv(testnew, file=paste0("Autoinsurance_testnew", ".csv"), row.names=F)
+```  
+

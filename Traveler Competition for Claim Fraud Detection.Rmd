@@ -1,0 +1,639 @@
+---
+title: "Traveler Competition"
+author: "Lingfeng Huo"
+date: "11/27/2021"
+output: html_document
+---
+
+```{r load packages}
+library(mlbench)
+library(MASS)
+library(glmvsd)
+library(dplyr)
+library(randomForest)
+```
+
+
+## Data part
+
+```{r read data}
+train_2021<-read.csv("train_2021.csv")
+
+#train_2021<-read.csv("train_2021_NA_deleted.csv")
+
+test_2021<-read.csv("test_2021.csv")
+```
+
+```{ training data processing by Lingfeng, former}
+# data cleaning
+# delete variables manually that are not related to the response
+trainnew<-train_2021[,-c(1,10,11,12,23)]
+# delete missing values
+a<-complete.cases(trainnew)
+trainnew<-trainnew[a,]
+# detect outliers and their locations
+outlier_col<-c(1,4,5,10,12,15,16,18,19)
+outlier_matrix<-matrix(data=NA,nrow=17836,ncol=9)
+for(i in 1:9)
+{
+  Mean<-mean(trainnew[,outlier_col[i]])
+  SD<-sd(trainnew[,outlier_col[i]])
+  for(j in 1:17836)
+  {
+    z_score<-abs(trainnew[j,outlier_col[i]]-Mean)/SD
+    if(z_score>=4)
+    {
+      outlier_matrix[j,i]<-1
+    }
+    else
+    {
+      outlier_matrix[j,i]<-0
+    }
+    
+  }
+}
+outlier_location<-which(rowSums(outlier_matrix)==0)
+# delete the cases containing outliers
+trainnew<-trainnew[outlier_location,]
+(nrow(train_2021)-nrow(trainnew))/nrow(train_2021)
+# find the class of each variables
+Class_matrix<-matrix(data=NA,nrow=1,ncol=20)
+for(i in 1:20)
+{
+  Class_matrix[i]<-class(trainnew[,i])
+}
+Class_matrix
+# change the class of the variables with unreasonable class
+trainnew$gender<-as.factor(trainnew$gender)
+trainnew$marital_status<-as.factor(trainnew$marital_status)
+trainnew$high_education_ind<-as.factor(trainnew$high_education_ind)
+trainnew$living_status<-as.factor(trainnew$living_status)
+trainnew$address_change_ind<-as.factor(trainnew$address_change_ind)
+trainnew$accident_site<-as.factor(trainnew$accident_site)
+trainnew$witness_present_ind<-as.factor(trainnew$witness_present_ind)
+trainnew$channel<-as.factor(trainnew$channel)
+trainnew$policy_report_filed_ind<-as.factor(trainnew$policy_report_filed_ind)
+trainnew$vehicle_category<-as.factor(trainnew$vehicle_category)
+
+trainnew$fraud<-as.factor(trainnew$fraud)
+
+# variables transformation
+trainnew$age_of_driver<-log(trainnew$age_of_driver)
+trainnew$claim_est_payout<-log(trainnew$claim_est_payout)
+trainnew$vehicle_price<-log(trainnew$vehicle_price)
+trainnew$vehicle_weight<-log(trainnew$vehicle_weight)
+trainnew$safty_rating<-(trainnew$safty_rating)^2
+trainnew$annual_income<-(trainnew$annual_income)^2
+```
+
+```{r Training data processing by Lingfeng}
+# Delete claim number
+trainnew<-train_2021[,-1]
+# Delete missing values
+a<-complete.cases(trainnew)
+trainnew<-trainnew[a,]
+
+# Convert Variables
+# Convert claim_data to Month
+trainnew$claim_date<-as.Date(trainnew$claim_date, format="%m/%d/%y")
+trainnew$claim_month<-format(as.Date(trainnew$claim_date), "%m")
+trainnew<-trainnew[,-which(colnames(trainnew)=="claim_date")]
+
+# Convert zip code
+#recode zip code to region of country (got zip codes for each state on irs.gov, grouped states into regions based on census groupings)
+trainnew=trainnew %>%
+  mutate(region=case_when(zip_code<=19699~'northeast', zip_code<=42799~'south', zip_code<=58899~'midwest', zip_code<=59999~'west', zip_code<=69399~'midwest', zip_code<=79999~'south', zip_code<=96199~'west', zip_code<=96899~'pacific', zip_code<=99499~'west', zip_code<=99999~'pacific'))
+
+trainnew<-trainnew[,-which(colnames(trainnew)=="zip_code")]
+
+
+# Detect outliers of numeric variables and their locations
+outlier_col<-c("age_of_driver", "safty_rating", "annual_income", "past_num_of_claims", "liab_prct", "claim_est_payout", "age_of_vehicle", "vehicle_price", "vehicle_weight")
+#outlier_col<-c(1,4,5,10,12,15,16,18,19)
+outlier_matrix<-matrix(data=NA, nrow=nrow(trainnew), ncol=length(outlier_col))
+for(i in 1:length(outlier_col)) {
+  Mean<-mean(trainnew[,outlier_col[i]])
+  SD<-sd(trainnew[,outlier_col[i]])
+  for(j in 1:17836)
+  {
+    z_score<-abs(trainnew[j,outlier_col[i]]-Mean)/SD
+    if(z_score>=4)
+    {
+      outlier_matrix[j,i]<-1
+    }
+    else
+    {
+      outlier_matrix[j,i]<-0
+    }
+    
+  }
+}
+outlier_location<-which(rowSums(outlier_matrix)==0)
+# delete the cases containing outliers
+trainnew<-trainnew[outlier_location,]
+(nrow(train_2021)-nrow(trainnew))/nrow(train_2021)
+
+# Convert variables into proper class
+# find the class of each variables
+Class_matrix<-matrix(data=NA,nrow=1,ncol=24)
+for(i in 1:24){
+  Class_matrix[i]<-class(trainnew[,i])
+}
+Class_matrix
+# change the class of the variables with unreasonable class
+trainnew$gender<-as.factor(trainnew$gender)
+trainnew$marital_status<-as.factor(trainnew$marital_status)
+trainnew$high_education_ind<-as.factor(trainnew$high_education_ind)
+trainnew$living_status<-as.factor(trainnew$living_status)
+trainnew$address_change_ind<-as.factor(trainnew$address_change_ind)
+trainnew$accident_site<-as.factor(trainnew$accident_site)
+trainnew$witness_present_ind<-as.factor(trainnew$witness_present_ind)
+trainnew$channel<-as.factor(trainnew$channel)
+trainnew$policy_report_filed_ind<-as.factor(trainnew$policy_report_filed_ind)
+trainnew$vehicle_category<-as.factor(trainnew$vehicle_category)
+
+trainnew$claim_month<-as.factor(trainnew$claim_month)
+trainnew$region<-as.factor(trainnew$region)
+
+trainnew$fraud<-as.factor(trainnew$fraud)
+```
+
+```{r Transformation by BC}
+#summary(trainnew)
+
+predr_nm<-c("age_of_driver", "safty_rating", "annual_income", "claim_est_payout", "vehicle_price", "vehicle_weight") # The predictors to consider Box-Cox
+
+for (i in 1:length(predr_nm)) {
+  MASS::boxcox(trainnew[,predr_nm[i]]~1)
+}
+
+#--- ---
+# Result of BC:
+# log:
+# 1 4 5 6
+predr_nm[c(1,4,5,6)]
+# square
+# 2 3
+predr_nm[c(2,3)]
+#--- ---
+
+
+# Variables transformation
+trainnew$age_of_driver<-log(trainnew$age_of_driver)
+trainnew$claim_est_payout<-log(trainnew$claim_est_payout)
+trainnew$vehicle_price<-log(trainnew$vehicle_price)
+trainnew$vehicle_weight<-log(trainnew$vehicle_weight)
+trainnew$safty_rating<-(trainnew$safty_rating)^2
+trainnew$annual_income<-(trainnew$annual_income)^2
+```
+
+```{r Construct X and Y by Lingfeng}
+#colnames(train_2021)[c(10,11,12,23)]
+
+X<-model.matrix(~(age_of_driver+ gender+ marital_status+ safty_rating+ annual_income+ high_education_ind+address_change_ind+living_status+region)^2+ (accident_site+past_num_of_claims+witness_present_ind+liab_prct+channel+policy_report_filed_ind+claim_est_payout+claim_month+claim_day_of_week)^2+ (age_of_vehicle+vehicle_category+vehicle_price+vehicle_weight+vehicle_color)^2, data=trainnew)[,-1]
+#X<-model.matrix(~age_of_driver+ gender+ marital_status+ safty_rating+ annual_income+ high_education_ind+ address_change_ind+ living_status+ accident_site+ past_num_of_claims+ witness_present_ind+ liab_prct+ channel+ policy_report_filed_ind+ claim_est_payout+ age_of_vehicle+ vehicle_category+ vehicle_price+ vehicle_weight,data=trainnew)[,-1]
+Y<-model.matrix(~fraud,trainnew)[,-1]
+n<-nrow(trainnew)
+```
+
+
+```{ test data processing}
+testdat<-test_2021[,-c(1,10,11,12,23)]
+# delete missing values
+
+idx.test<-complete.cases(testdat)
+
+testdat<-testdat[idx.test,]
+
+pred.f.nm<-c("gender", "marital_status" ,"high_education_ind", "living_status", "address_change_ind", "accident_site", "witness_present_ind", "channel", "policy_report_filed_ind", "vehicle_category")
+pred.log.nm<-c("age_of_driver", "claim_est_payout", "vehicle_price", "vehicle_weight")
+pred.sqrd.nm<-c("safty_rating", "annual_income")
+
+for (i in 1:length(pred.f.nm)) {
+  testdat[,pred.f.nm[i]]<-as.factor(testdat[,pred.f.nm[i]])
+}
+for (i in 1:length(pred.log.nm)) {
+  testdat[,pred.log.nm[i]]<-log(testdat[,pred.log.nm[i]])
+}
+for (i in 1:length(pred.sqrd.nm)) {
+  testdat[,pred.sqrd.nm[i]]<-testdat[,pred.sqrd.nm[i]]^2
+}
+
+# Construct matrix
+X_test<-model.matrix(~(age_of_driver+ gender+ marital_status+ safty_rating+ annual_income+ high_education_ind+ address_change_ind+ living_status)^2+ (accident_site+ past_num_of_claims+ witness_present_ind+ liab_prct+ channel+ policy_report_filed_ind+ claim_est_payout)^2+ (age_of_vehicle+ vehicle_category+ vehicle_price+ vehicle_weight)^2, data=testdat)[,-1]
+```
+
+```{r Test data processing}
+testdat<-test_2021[,-1]
+# delete missing values
+
+idx.test<-complete.cases(testdat)
+
+testdat<-testdat[idx.test,]
+
+# Convert Variables
+
+# Convert claim_data to Month
+
+testdat$claim_date<-as.Date(testdat$claim_date, format="%m/%d/%y")
+testdat$claim_month<-format(as.Date(testdat$claim_date), "%m")
+testdat<-testdat[,-which(colnames(testdat)=="claim_date")]
+
+# Convert zip code
+
+#recode zip code to region of country (got zip codes for each state on irs.gov, grouped states into regions based on census groupings)
+testdat=testdat %>%
+  mutate(region=case_when(zip_code<=19699~'northeast', zip_code<=42799~'south', zip_code<=58899~'midwest', zip_code<=59999~'west', zip_code<=69399~'midwest', zip_code<=79999~'south', zip_code<=96199~'west', zip_code<=96899~'pacific', zip_code<=99499~'west', zip_code<=99999~'pacific'))
+
+testdat<-testdat[,-which(colnames(testdat)=="zip_code")]
+
+pred.f.nm<-c("gender", "marital_status" ,"high_education_ind", "living_status", "address_change_ind", "accident_site", "witness_present_ind", "channel", "policy_report_filed_ind", "vehicle_category", "claim_month", "region", "claim_day_of_week", "vehicle_color")
+pred.log.nm<-c("age_of_driver", "claim_est_payout", "vehicle_price", "vehicle_weight")
+pred.sqrd.nm<-c("safty_rating", "annual_income")
+
+for (i in 1:length(pred.f.nm)) {
+  testdat[,pred.f.nm[i]]<-as.factor(testdat[,pred.f.nm[i]])
+}
+for (i in 1:length(pred.log.nm)) {
+  testdat[,pred.log.nm[i]]<-log(testdat[,pred.log.nm[i]])
+}
+for (i in 1:length(pred.sqrd.nm)) {
+  testdat[,pred.sqrd.nm[i]]<-testdat[,pred.sqrd.nm[i]]^2
+}
+
+# Construct matrix
+X_test<-model.matrix(~(age_of_driver+ gender+ marital_status+ safty_rating+ annual_income+ high_education_ind+address_change_ind+living_status+region)^2+ (accident_site+past_num_of_claims+witness_present_ind+liab_prct+channel+policy_report_filed_ind+claim_est_payout+claim_month+claim_day_of_week)^2+ (age_of_vehicle+vehicle_category+vehicle_price+vehicle_weight+vehicle_color)^2, data=testdat)[,-1]
+```
+
+
+## Variable Selection
+
+```{r stepwise method}
+# FS
+m0<-glm(fraud~1,family=binomial,data=trainnew)
+f<-~(age_of_driver+ gender+ marital_status+ safty_rating+ annual_income+ high_education_ind+address_change_ind+living_status+region)^2+ (accident_site+past_num_of_claims+witness_present_ind+liab_prct+channel+policy_report_filed_ind+claim_est_payout+claim_month+claim_day_of_week)^2+ (age_of_vehicle+vehicle_category+vehicle_price+vehicle_weight+vehicle_color)^2
+m.FS<-step(m0,scope=f,direction='forward',trace=F)
+# Preparation and Calculation for VSD, F-measure and G-measure
+m.lm<-lm(fraud~(age_of_driver+ gender+ marital_status+ safty_rating+ annual_income+ high_education_ind+address_change_ind+living_status+region)^2+ (accident_site+past_num_of_claims+witness_present_ind+liab_prct+channel+policy_report_filed_ind+claim_est_payout+claim_month+claim_day_of_week)^2+ (age_of_vehicle+vehicle_category+vehicle_price+vehicle_weight+vehicle_color)^2, data=trainnew)
+variable_all<-names(m.lm$coefficients)[-1]  # All the variables with factors expanded in levels
+variable_selected<-names(m.FS$coefficients)[-1]  # Variables selected
+#setdiff(variable_all, variable_selected) # Variables not selected
+#variable_all<-names(trainnew)[-20]
+#variable_selected<-attr(m.FS$terms, "term.labels")
+modelcheck.FS<-as.numeric(variable_all %in% variable_selected)
+modelcheck.FS
+
+VSD_ARM_FS<-glmvsd::glmvsd(X,Y,n_train=ceiling(n/2),no_rep=100,model_check=modelcheck.FS,psi=1,family="binomial",method="union",weight_type="ARM",prior=TRUE)
+VSD_ARM_FS
+
+# BE
+m1<-glm(fraud~(age_of_driver+ gender+ marital_status+ safty_rating+ annual_income+ high_education_ind+address_change_ind+living_status+region)^2+ (accident_site+past_num_of_claims+witness_present_ind+liab_prct+channel+policy_report_filed_ind+claim_est_payout+claim_month+claim_day_of_week)^2+ (age_of_vehicle+vehicle_category+vehicle_price+vehicle_weight+vehicle_color)^2,family=binomial,data=trainnew)
+m.BE<-step(m1,scope=c(lower=~1),direction='backward',trace=F)
+# Preparation and Calculation for VSD, F-measure and G-measure
+variable_selected<-names(m.BE$coefficients)[-1]
+#variable_selected<-attr(m.BE$terms, "term.labels")  # Variables selected
+modelcheck.BE<-as.numeric(variable_all %in% variable_selected)
+modelcheck.BE
+VSD_ARM_BE<-glmvsd::glmvsd(X,Y,n_train=ceiling(n/2),no_rep=100,model_check=modelcheck.BE,psi=1,family="binomial",method="union",weight_type="ARM",prior=TRUE)
+VSD_ARM_BE
+
+# SW
+m.SWUP<-step(m0,scope=f,direction='both',trace=F)
+# Preparation and Calculation for VSD, F-measure and G-measure
+variable_selected<-names(m.BE$coefficients)[-1]
+#variable_selected<-attr(m.SWUP$terms, "term.labels")  # Variables selected
+modelcheck.SWUP<-as.numeric(variable_all %in% variable_selected)
+modelcheck.SWUP
+VSD_ARM_SWUP<-glmvsd::glmvsd(X,Y,n_train=ceiling(n/2),no_rep=100,model_check=modelcheck.SWUP,psi=1,family="binomial",method="union",weight_type="ARM",prior=TRUE)
+VSD_ARM_SWUP
+```
+
+```{r Sparsity Method}
+# Lasso
+cv.out<-cv.glmnet(X, Y, alpha=1, nfolds=10, family=binomial)
+lambda.lasso<-cv.out$lambda.1se
+m.lasso<-glmnet(X, Y, alpha=1, lambda=lambda.lasso, family=binomial)
+
+beta.lasso<-m.lasso$beta
+beta.lasso[abs(beta.lasso)>0]<-1
+model_check.lasso<-as.numeric(beta.lasso)
+VSD_ARM_lasso<-glmvsd::glmvsd(X,Y,n_train=ceiling(n/2),no_rep=100,model_check=model_check.lasso,psi=1,family="binomial",method="union",weight_type="BIC",prior=TRUE)
+VSD_ARM_lasso
+
+# MCP
+cv.out1<-cv.ncvreg(X,Y,nfolds=10,penalty="MCP",family="binomial")
+lambda.MCP<-cv.out1$lambda.min
+m.MCP<-ncvreg(X,Y,alpha=1,penalty="MCP",lambda=lambda.MCP,family="binomial")
+beta.MCP<-m.MCP$beta[-1]
+beta.MCP[abs(beta.MCP)>0]<-1
+model_check.MCP<-as.numeric(beta.MCP)
+VSD_ARM_MCP<-glmvsd::glmvsd(X,Y,n_train=ceiling(n/2),no_rep=100,model_check=model_check.MCP,psi=1,family="binomial",method="union",weight_type="BIC",prior=TRUE)
+VSD_ARM_MCP
+
+# SCAD
+cv.out1<-cv.ncvreg(X,Y,penalty="SCAD",nfolds=10,family="binomial")
+lambda.SCAD<-cv.out1$lambda.min
+m.SCAD<-ncvreg(X,Y,alpha=1,penalty="SCAD",lambda=lambda.SCAD,family="binomial")
+beta.SCAD<-m.SCAD$beta[-1]
+beta.SCAD[abs(beta.SCAD)>0]<-1
+model_check.SCAD<-as.numeric(beta.SCAD)
+VSD_ARM_SCAD<-glmvsd::glmvsd(X,Y,n_train=ceiling(n/2),no_rep=100,model_check=model_check.SCAD,psi=1,family="binomial",method="union",weight_type="BIC",prior=TRUE)
+VSD_ARM_SCAD
+```
+
+
+## Model Fitting
+
+```{r binomial regression}
+fraud_colnm<-which(colnames(trainnew)=="fraud")
+
+fit.binom<-glm(fraud~., data=trainnew, family=binomial)
+summary(fit.binom)
+
+resu_train.binom<-predict(fit.binom, newdata=trainnew[,-fraud_colnm], type="response")
+resu_train.binom
+
+which(resu_train.binom>=0.18)
+
+# Prediction
+resu.binom<-ifelse(predict(fit.binom, newdata=testdat, type="response")>0.18, 1, 0)
+length(resu.binom)
+which(resu.binom==1)
+```
+
+```{r LASSO}
+library(glmnet)
+cv.out<-cv.glmnet(X, Y, alpha=1, nfolds=10, family=binomial)
+lambda.lasso<-cv.out$lambda.1se
+m.lasso<-glmnet(X, Y, alpha=1, lambda=lambda.lasso, family=binomial)
+
+beta.lasso<-m.lasso$beta
+beta.lasso[abs(beta.lasso)>0]<-1
+model_check.lasso<-as.numeric(beta.lasso)
+
+resu_train.lasso<-predict(m.lasso, newx=X, type="response")
+
+which(resu_train.lasso>=0.17)
+
+# Prediction
+pro.lasso<-predict(m.lasso, newx=X_test, type="response")
+which(pro.lasso>=0.17)
+
+resu.lasso<-ifelse(predict(m.lasso, newx=X_test, type="response")>0.17, 1, 0)
+which(resu.lasso==1)
+```
+
+```{r SOIL}
+# Logistic regression with SOIL method to obtain important variables
+Soil_BIC<-SOIL::SOIL(X, Y, family = "binomial", weight_type = "BIC")
+#  Importance<-colnames(Soil_BIC$importance)[order(Soil_BIC$importance, decreasing=TRUE)]
+#  Importance<-Importance[1:18] #soil value >= 0.0001
+Importance<-colnames(Soil_BIC$importance)[which(Soil_BIC$importance>=0.001)]
+  
+Xnew<-X[,colnames(X)%in%Importance]
+m_train.soil<-glm.fit(Xnew, Y, family=binomial(), intercept=T)
+
+# Prediction
+#X_test_new<-X_test[,colnames(X_test)%in%Importance]
+#m.soil<-glm.fit(X_test_new, Y, family=binomial(), intercept=T)
+#faraway::ilogit(X_test_new%*%m.soil$coefficient)
+```
+
+
+```{r random forest}
+fit.rf_bag<-randomForest(fraud~., data=trainnew,  importance=T, mtry=22)
+
+fit.rf_bag
+fit.rf_bag$importance
+
+resu_train.rf<-predict(object=fit.rf_bag, newdata=trainnew)
+which(resu_train.rf==1)
+
+# Prediction
+resu.rf<-predict(object=fit.rf_bag, newdata=testdat)
+which(resu.rf==1)
+```
+
+
+## Evaluation
+
+```{r Evalution}
+## we use `m.lasso` as the default model
+
+# 3.1 Calculating Accuracy, Sensitivity & Specificity, PPV & NPV and F1 score by using package `caret`
+## Creating confusion matrix
+threshold=0.44
+predicted_values<-ifelse(predict(m.lasso, newx=X, type="response")>threshold, 1, 0)
+#actual_values<-m.lasso$y 
+actual_values<-Y
+conf_matrix<-table(predicted_values, actual_values)
+conf_matrix
+## Code confusionMatrix
+library(caret)
+result <- confusionMatrix(conf_matrix, mode = "everything")
+result
+result$byClass["Sensitivity"]
+result$byClass["Specificity"]
+result$byClass["Pos Pred Value"]
+result$byClass["Neg Pred Value"]
+result$byClass["Precision"]
+result$byClass["Recall"]
+result$byClass["F1"]
+
+## change threshold and code changed confusionMatrix
+threshold=0.3
+predicted_values<-ifelse(predict(m.lasso, newx=X, type="response")>threshold,1,0)
+actual_values<-Y
+conf_matrix<-table(predicted_values,actual_values)
+conf_matrix
+## Code confusionMatrix
+library(caret)
+result <- confusionMatrix(conf_matrix, mode = "everything")
+result
+result$byClass["Sensitivity"]
+result$byClass["Specificity"]
+result$byClass["Pos Pred Value"]
+result$byClass["Neg Pred Value"]
+result$byClass["Precision"]
+result$byClass["Recall"]
+result$byClass["F1"]
+
+# 3.2 Getting ROC curve and AUC
+library(pROC)
+pred_fitted=predict(m.lasso,X, type='response')
+roc(trainnew$fraud,pred_fitted,plot = T)
+```
+
+
+```{r find the best threshold}
+thrshd_seq<-seq(from=0.1, to=0.54, by=0.01)
+F1_score_resu<-numeric(length(thrshd_seq))
+
+for (i in 1:length(thrshd_seq)) {
+
+#  predicted_values<-ifelse(predict(m.lasso, newx=X, type="response")>thrshd_seq[i], 1, 0)
+  predicted_values<-ifelse(predict(fit.binom, newdata=trainnew[,-20], type="response")>thrshd_seq[i], 1, 0)
+  actual_values<-trainnew[,20]
+  conf_matrix<-table(predicted_values, actual_values)
+#  conf_matrix
+#  result<-confusionMatrix(conf_matrix, mode="everything")
+  prec<-conf_matrix[2,2]/(conf_matrix[2,1]+conf_matrix[2,2])
+  rec<-conf_matrix[2,2]/(conf_matrix[2,2]+conf_matrix[1,2])
+  F1_score_resu[i]<-2*prec*rec/(prec+rec)
+#  F1_score_resu[i]<-result$byClass["F1"] 
+}
+
+F1_score_resu
+which.max(F1_score_resu)
+plot(F1_score_resu)
+```
+
+```{r CV}
+# Use CV to obtain the best thershold for lasso and logistic regression
+#Shuffle the data and preprocess the data set
+trainnew<-trainnew[sample(nrow(trainnew)),]
+#Create 3 equally size folds
+folds1 <- cut(seq(1,nrow(trainnew)),breaks=3,labels=FALSE)
+#define the thershold sequence and the F1-score matrix for the thershoulds
+thrshd_seq<-seq(from=0.1, to=0.34, by=0.01)
+F1_score_resu_lasso<-matrix(data=NA,nrow=3,ncol=length(thrshd_seq))
+F1_score_resu_logistic<-matrix(data=NA,nrow=3,ncol=length(thrshd_seq))
+F1_score_resu_binomial<-matrix(data=NA,nrow=3,ncol=length(thrshd_seq))
+F1_score_resu_rf<-matrix(data=NA,nrow=3,ncol=1)
+#Perform 3 fold cross validation
+for(i in 1:3){
+  #Segment data by folds
+  testIndexes <- which(folds1==i,arr.ind=TRUE)
+  testData <- trainnew[testIndexes, ]
+  trainData <- trainnew[-testIndexes, ]
+  
+  # LASSO
+  # fit the model with trainset
+  X<-model.matrix(~(age_of_driver+ gender+ marital_status+ safty_rating+ annual_income+ high_education_ind+address_change_ind+living_status+region)^2+ (accident_site+past_num_of_claims+witness_present_ind+liab_prct+channel+policy_report_filed_ind+claim_est_payout+claim_month+claim_day_of_week)^2+ (age_of_vehicle+vehicle_category+vehicle_price+vehicle_weight+vehicle_color)^2,data=trainData)[,-1]
+  Y<-model.matrix(~fraud,trainData)[,-1]
+  #cv.out<-cv.glmnet(X,Y,alpha=1,nfolds=10,family=binomial)
+  #lambda.lasso<-cv.out$lambda.1se
+  #m.lasso<-glmnet(X,Y,alpha=1,lambda =lambda.lasso,family=binomial)
+ 
+   
+  # Logistic regression with SOIL method to obtain important variables
+  Soil_BIC<-SOIL::SOIL(X, Y, family = "binomial", weight_type = "BIC")
+  Importance<-colnames(Soil_BIC$importance)[which(Soil_BIC$importance>=0.001)]
+  
+  Xnew<-X[,colnames(X)%in%Importance]
+  m.soil<-glm.fit(Xnew,Y,family=binomial(),intercept=T)
+  
+  # general binomial regression
+  #m.binomial<-glm(fraud~.,family=binomial,data=trainData)
+  
+  # random forest
+  m.rf<-randomForest(fraud~., mtry=22, trainData)
+  # set the test set as model matrix and adjust its predictors for logistic regression
+  NewX_lasso<-model.matrix(~(age_of_driver+ gender+ marital_status+ safty_rating+ annual_income+ high_education_ind+address_change_ind+living_status+region)^2+ (accident_site+past_num_of_claims+witness_present_ind+liab_prct+channel+policy_report_filed_ind+claim_est_payout+claim_month+claim_day_of_week)^2+ (age_of_vehicle+vehicle_category+vehicle_price+vehicle_weight+vehicle_color)^2,data=testData)[,-1]
+  NewX_logistic<-NewX_lasso[,colnames(X)%in%Importance]
+  NewX_binomial<-model.matrix(~age_of_driver+ gender+ marital_status+ safty_rating+ annual_income+ high_education_ind+address_change_ind+living_status+region+ accident_site+past_num_of_claims+witness_present_ind+liab_prct+channel+policy_report_filed_ind+claim_est_payout+claim_month+claim_day_of_week+ age_of_vehicle+vehicle_category+vehicle_price+vehicle_weight+vehicle_color,data=testData)[,-1]
+  NewX_rf<-testData
+  for(j in 1:length(thrshd_seq))
+  {
+    # predict the results with testset and calculate the F1-score
+    #Lasso
+    #predicted_values<-ifelse(predict(m.lasso, newx=NewX_lasso, type="response")>thrshd_seq[j], 1, 0)
+    #actual_values<-testData[,22]
+    #conf_matrix<-table(predicted_values, actual_values)
+    # calculate the F1-score
+    #prec<-conf_matrix[2,2]/(conf_matrix[2,1]+conf_matrix[2,2])
+    #rec<-conf_matrix[2,2]/(conf_matrix[2,2]+conf_matrix[1,2])
+    #F1_score_resu_lasso[i,j]<-2*prec*rec/(prec+rec)
+    
+    # logistic with SOIL method
+    predicted_values<-ifelse(ilogit(NewX_logistic%*%m.soil$coefficients)>thrshd_seq[j], 1, 0)
+    actual_values<-testData[,22]
+    conf_matrix<-table(predicted_values, actual_values)
+    # calculate the F1-score
+    prec<-conf_matrix[2,2]/(conf_matrix[2,1]+conf_matrix[2,2])
+    rec<-conf_matrix[2,2]/(conf_matrix[2,2]+conf_matrix[1,2])
+    F1_score_resu_logistic[i,j]<-2*prec*rec/(prec+rec)
+    
+    # General Binomial
+    #predicted_values<-ifelse(predict(m.binomial,newdata=data.frame(testData[,-22]),type="response")>thrshd_seq[j], 1, 0)
+    #actual_values<-testData[,22]
+    #conf_matrix<-table(predicted_values, actual_values)
+    # calculate the F1-score
+    #prec<-conf_matrix[2,2]/(conf_matrix[2,1]+conf_matrix[2,2])
+    #rec<-conf_matrix[2,2]/(conf_matrix[2,2]+conf_matrix[1,2])
+    #F1_score_resu_binomial[i,j]<-2*prec*rec/(prec+rec)
+  }
+  
+  # Random Forest
+  predicted_values<-predict(m.rf,newdata=NewX_rf)
+  actual_values<-testData[,22]
+  conf_matrix<-table(predicted_values, actual_values)
+  # calculate the F1-score
+  prec<-conf_matrix[2,2]/(conf_matrix[2,1]+conf_matrix[2,2])
+  rec<-conf_matrix[2,2]/(conf_matrix[2,2]+conf_matrix[1,2])
+  F1_score_resu_rf[i,]<-2*prec*rec/(prec+rec)
+}
+
+# Lasso
+# average F1-score for each thershold
+#aver_F1_lasso<-colMeans(F1_score_resu_lasso)
+# choose the best thershold that minimizes the average F1-score
+#thrshd_seq[which.max(aver_F1_lasso)]
+# the minimized F1-score
+#max(aver_F1_lasso)
+
+# Logistic regression with SOIL method
+# average F1-score for each thershold
+aver_F1_logistic<-colMeans(F1_score_resu_logistic)
+# choose the best thershold that minimizes the average F1-score
+thrshd_seq[which.max(aver_F1_logistic)]
+# the minimized F1-score
+max(aver_F1_logistic)
+
+# General Binomial
+# average F1-score for each thershold
+#aver_F1_binomial<-colMeans(F1_score_resu_binomial)
+# choose the best thershold that minimizes the average F1-score
+#thrshd_seq[which.max(aver_F1_binomial)]
+# the minimized F1-score
+#max(aver_F1_binomial)
+
+# Random Forest
+# the average F1-score
+mean(aver_F1_rf)
+```
+
+
+## Output Results
+
+```{r Output csv file}
+resu.tb<-data.frame(claim_number=test_2021$claim_number, pred=rep(1, nrow(test_2021)))
+
+# DELETE LATER
+per_frd<-2796/17836
+resu.tb[,2]<-rbinom(n=nrow(test_2021), size=1, prob=per_frd)
+
+time_now<-gsub(":", "-", Sys.time())
+write.csv(resu.tb, file=paste0("Submit_Group2", " ", time_now, ".csv"), row.names=F)
+
+# Random Forest
+resu.tb[idx.test, "fraud"]<-as.numeric(resu.rf)-1
+which(resu.tb[,"fraud"]==1)
+
+time_now<-gsub(":", "-", Sys.time())
+write.csv(resu.tb, file=paste0("Submit_Group2", " ", time_now, ".csv"), row.names=F)
+
+# Lasso
+resu.tb[idx.test, "fraud"]<-as.numeric(resu.lasso)
+which(resu.tb[,"fraud"]==1)
+
+time_now<-gsub(":", "-", Sys.time())
+write.csv(resu.tb, file=paste0("Submit_Group2", " ", time_now, ".csv"), row.names=F)
+
+# Binomial
+resu.tb[idx.test, "fraud"]<-as.numeric(resu.binom)
+which(resu.tb[,"fraud"]==1)
+
+time_now<-gsub(":", "-", Sys.time())
+write.csv(resu.tb, file=paste0("Submit_Group2", " ", time_now, ".csv"), row.names=F)
+```
